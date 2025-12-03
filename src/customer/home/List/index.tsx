@@ -4,9 +4,9 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   FlatList,
   Alert,
+  Modal,
 } from "react-native";
 import { RouteProp, useRoute } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -45,7 +45,10 @@ export default function ListScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [filter, setFilter] = useState<"toTake" | "alreadyTaken">("toTake");
   const [items, setItems] = useState<Item[]>([]);
-  const [inputValue, setInputValue] = useState("");
+  const [availableItems, setAvailableItems] = useState<
+    { id: string; name: string }[]
+  >([]);
+  const [showItemSelector, setShowItemSelector] = useState(false);
 
   // Escutar mudanças no estado de autenticação
   useEffect(() => {
@@ -87,6 +90,21 @@ export default function ListScreen() {
     return unsubscribe;
   }, [user, params.id]);
 
+  // Carregar itens pré-definidos do Firebase
+  useEffect(() => {
+    const itemsRef = collection(db, "items");
+
+    const unsubscribe = onSnapshot(itemsRef, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        name: doc.data().name,
+      }));
+      setAvailableItems(data);
+    });
+
+    return unsubscribe;
+  }, []);
+
   // Atualizar updatedAt da lista quando houver mudanças
   async function updateListTimestamp() {
     if (!user || !params.id) return;
@@ -96,21 +114,31 @@ export default function ListScreen() {
     });
   }
 
-  async function addItem() {
-    if (!inputValue.trim() || !user || !params.id) return;
+  async function addItem(itemName: string) {
+    if (!itemName.trim() || !user || !params.id) return;
+
+    // Verificar se o item já existe na lista
+    const itemExists = items.some(
+      (item) => item.name.toLowerCase() === itemName.toLowerCase()
+    );
+
+    if (itemExists) {
+      Alert.alert("Item já existe", "Este item já está na sua lista.");
+      return;
+    }
 
     try {
       await addDoc(
         collection(db, "users", user.uid, "lists", params.id, "items"),
         {
-          name: inputValue.trim(),
+          name: itemName.trim(),
           quantity: 1,
           checked: false,
           createdAt: serverTimestamp(),
         }
       );
       await updateListTimestamp();
-      setInputValue("");
+      setShowItemSelector(false);
       setFilter("toTake");
     } catch (error: any) {
       console.log("Erro ao adicionar item:", error.message);
@@ -345,19 +373,78 @@ export default function ListScreen() {
         }}
       />
 
-      <View style={styles.inputRow}>
-        <TextInput
-          placeholder="Novo item..."
-          style={styles.input}
-          value={inputValue}
-          onChangeText={setInputValue}
-          returnKeyType="done"
-          onSubmitEditing={addItem}
-        />
-        <TouchableOpacity style={styles.addButton} onPress={addItem}>
-          <Text style={styles.addButtonText}>Adicionar</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={() => setShowItemSelector(true)}
+      >
+        <MaterialIcons name="add" size={24} color="#fff" />
+        <Text style={styles.addButtonText}>Adicionar Item</Text>
+      </TouchableOpacity>
+
+      <Modal
+        visible={showItemSelector}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowItemSelector(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Selecionar Item</Text>
+              <TouchableOpacity
+                onPress={() => setShowItemSelector(false)}
+                style={styles.closeButton}
+              >
+                <MaterialIcons name="close" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={availableItems}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => {
+                const isAlreadyAdded = items.some(
+                  (listItem) =>
+                    listItem.name.toLowerCase() === item.name.toLowerCase()
+                );
+
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.itemOption,
+                      isAlreadyAdded && styles.itemOptionDisabled,
+                    ]}
+                    onPress={() => !isAlreadyAdded && addItem(item.name)}
+                    disabled={isAlreadyAdded}
+                  >
+                    <Text
+                      style={[
+                        styles.itemOptionText,
+                        isAlreadyAdded && styles.itemOptionTextDisabled,
+                      ]}
+                    >
+                      {item.name}
+                    </Text>
+                    {isAlreadyAdded && (
+                      <MaterialIcons
+                        name="check-circle"
+                        size={20}
+                        color="#9CA3AF"
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={
+                <Text style={styles.emptyModalText}>
+                  Nenhum item disponível.
+                </Text>
+              }
+              contentContainerStyle={styles.modalListContent}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -486,31 +573,93 @@ const styles = StyleSheet.create({
     padding: 8,
   },
 
-  inputRow: {
-    flexDirection: "row",
-    marginTop: 12,
-    gap: 10,
-    marginBottom: 30,
-  },
-
-  input: {
-    flex: 1,
-    padding: 12,
-    backgroundColor: "#F3F4F6",
-    borderRadius: 8,
-    fontSize: 16,
-  },
-
   addButton: {
-    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     backgroundColor: "#1D4ED8",
     borderRadius: 8,
-    justifyContent: "center",
   },
 
   addButtonText: {
     color: "#FFF",
     fontWeight: "700",
+    fontSize: 16,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+
+  modalContent: {
+    backgroundColor: "#FFF",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: "80%",
+    paddingBottom: 20,
+  },
+
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  closeButton: {
+    padding: 4,
+  },
+
+  modalListContent: {
+    padding: 16,
+  },
+
+  itemOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+
+  itemOptionDisabled: {
+    backgroundColor: "#F3F4F6",
+    opacity: 0.6,
+  },
+
+  itemOptionText: {
+    fontSize: 16,
+    color: "#111827",
+    fontWeight: "500",
+  },
+
+  itemOptionTextDisabled: {
+    color: "#9CA3AF",
+  },
+
+  emptyModalText: {
+    textAlign: "center",
+    color: "#6B7280",
+    marginTop: 40,
+    fontSize: 16,
   },
 
   backButton: {
