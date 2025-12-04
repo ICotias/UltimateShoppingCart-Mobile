@@ -1,5 +1,10 @@
+// src/services/firebase.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import {
+    getAuth,
+    initializeAuth,
+    browserLocalPersistence,
+} from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -9,12 +14,20 @@ const firebaseConfig = {
     storageBucket: "smartshoppingcart-f59a8.firebasestorage.app",
     messagingSenderId: "1062447419900",
     appId: "1:1062447419900:web:83a97140bafaedb40fa279",
-    measurementId: "G-XVX1H8LJ8K"
+    measurementId: "G-XVX1H8LJ8K",
 };
 
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
-export const auth = getAuth(app);
+// para evitar múltiplas inicializações em dev
+let _auth;
+try {
+    _auth = getAuth(app);
+} catch {
+    _auth = initializeAuth(app, {
+        persistence: browserLocalPersistence,
+    });
+}
 
+export const auth = _auth;
 export const db = getFirestore(app);
-
